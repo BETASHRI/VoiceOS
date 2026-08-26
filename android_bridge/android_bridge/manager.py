@@ -1,4 +1,4 @@
-"""In-memory command manager for connected Android VoiceOS devices."""
+"""Command manager for connected Android VoiceOS devices."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ from android_bridge.protocol import AndroidCommand, AndroidResult
 
 
 class AndroidDeviceManager:
-    """Tracks Android devices and queues commands/results for them."""
+    """Tracks Android devices and coordinates commands and results."""
 
     def __init__(self) -> None:
-        self._queues: Dict[str, asyncio.Queue[AndroidCommand]] = defaultdict(asyncio.Queue)
-        self._results: Dict[str, AndroidResult] = {}
+        self._queues: Dict[str, asyncio.Queue[AndroidCommand]] = defaultdict(
+            asyncio.Queue
+        )
+        self._pending: Dict[str, asyncio.Future[AndroidResult]] = {}
         self._lock = asyncio.Lock()
 
     async def register(self, device_id: str) -> None:
@@ -27,7 +29,11 @@ class AndroidDeviceManager:
     async def unregister(self, device_id: str) -> None:
         async with self._lock:
             self._queues.pop(device_id, None)
-            self._results.pop(device_id, None)
+
+            for command_id, future in list(self._pending.items()):
+                if not future.done():
+                    future.cancel()
+                self._pending.pop(command_id, None)
 
     async def is_registered(self, device_id: str) -> bool:
         async with self._lock:
@@ -38,6 +44,9 @@ class AndroidDeviceManager:
             raise KeyError(
                 f"Android device is not registered: {command.device_id}"
             )
+
+        async with self._lock:
+            self._pending[command.command_id] = asyncio.get_running_loop().create_future()
 
         await self._queues[command.device_id].put(command)
 
@@ -62,23 +71,29 @@ class AndroidDeviceManager:
         except asyncio.TimeoutError:
             return None
 
-    async def record_result(
-        self,
-        device_id: str,
-        result: AndroidResult,
-    ) -> None:
-        if not await self.is_registered(device_id):
-            raise KeyError(
-                f"Android device is not registered: {device_id}"
-            )
+    async def record_result(self, result: AndroidResult) -> None:
+        async with self._lock:
+            future = self._pending.pop(result.command_id, None)
 
-        self._results[device_id] = result
+        if future is not None and not future.done():
+            future.set_result(result)
 
-    async def latest_result(
+    async def wait_for_result(
         self,
-        device_id: str,
-    ) -> Optional[AndroidResult]:
-        return self._results.get(device_id)
+        command_id: str,
+        timeout: float = 30.0,
+    ) -> AndroidResult:
+        async with self._lock:
+            future = self._pending.get(command_id)
+
+        if future is None:
+            raise KeyError(f"Unknown Android command: {command_id}")
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            async with self._lock:
+                self._pending.pop(command_id, None)
 
 
 android_device_manager = AndroidDeviceManager()
