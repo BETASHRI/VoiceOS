@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-
+from android_bridge.server import router as android_router
 from gateway.voiceos_adapter import VoiceOSGatewayAdapter
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,10 @@ def _render_prompt(template: str, payload: Any) -> str:
 
 def create_app(adapter: VoiceOSGatewayAdapter, gateway_config) -> FastAPI:
     app = FastAPI(title="VoiceOS Gateway", version="1.0.0")
+
+    # Android device WebSocket bridge.
+    app.include_router(android_router)
+
     routes: Dict[str, Any] = getattr(gateway_config, "webhooks", {}) or {}
 
     @app.get("/health", response_model=HealthResponse)
