@@ -107,7 +107,7 @@ public class MainActivity extends Activity {
                         message.optString("command_id");
 
                 String command =
-                        message.optString("command");
+                        message.optString("intent");
 
                 JSONObject params =
                         message.optJSONObject("params");
