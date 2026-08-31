@@ -142,6 +142,7 @@ public class MainActivity extends Activity {
             result.put("type", "result");
             result.put("command_id", commandId);
             result.put("success", true);
+            result.put("intent", command);
             result.put(
                     "message",
                     "Command received: " + command
